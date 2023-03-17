@@ -1,0 +1,7 @@
+library WinjsClipboard;
+
+uses ChakraClipboard;
+
+exports GetJsValue;
+
+end.
