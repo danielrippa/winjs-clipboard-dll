@@ -4,12 +4,19 @@ unit Win32Clipboard;
 
 interface
 
-  function GetClipboardText: UnicodeString;
+  uses
+    Win32Types;
+
+  function GetClipboardText: WideString;
   function SetClipboardText(aText: UnicodeString): Boolean;
+
+  function GetFilesFromClipboard: WideStringArray;
+  function AddFilesToClipboard(aFiles: WideStringArray): Boolean;
 
 implementation
 
-  uses Windows;
+  uses
+    Windows, Win32ClipboardTypes, Shell32, SysUtils, ChakraErr;
 
   function AddDataToClipboard(Format: UINT; const Data; Size: PtrUint): Boolean;
   var
@@ -43,7 +50,7 @@ implementation
           try
             P := PWideChar(GlobalLock(Handle));
 
-            Result := UnicodeString(P);
+            Result := WideString(P);
 
           finally
             if Handle <> 0 then begin
@@ -68,6 +75,113 @@ implementation
         end;
       finally
       end;
+    end;
+
+  end;
+
+  function GetFilesFromClipboard;
+  var
+    DropHandle: HDROP;
+    Count: Integer;
+    I: Integer;
+    FileNameLength: Integer;
+    FileName: array[0..MAX_PATH] of WideChar;
+  begin
+
+    if OpenClipboard(0) then begin
+
+      try
+
+        DropHandle := HDROP(GetClipboardData(CF_HDROP));
+        if DropHandle <> 0 then begin
+
+          Count := DragQueryFileW(DropHandle, $FFFFFFFF, Nil, 0);
+          SetLength(Result, Count);
+
+          for I := 0 to Count - 1 do begin
+
+            DragQueryFileW(DropHandle, I, FileName, Length(FileName));
+            Result[I] := FileName;
+
+          end;
+
+        end;
+
+      finally
+
+        CloseClipboard;
+
+      end;
+
+    end;
+
+  end;
+
+  function AddFilesToClipboard;
+  var
+    DropFiles: PDropFiles;
+    Memory: HGLOBAL;
+    Size: Integer;
+    I: Integer;
+    P: PWideChar;
+  begin
+
+    Result := True;
+
+    Size := SizeOf(TDropFiles);
+
+    for I := 0 to Length(aFiles) - 1 do begin
+
+      Size := Size + (Length(aFiles[I]) + 1) * SizeOf(WideChar);
+      Inc(Size);
+
+    end;
+
+    Memory := GlobalAlloc(GHND or GMEM_SHARE, Size);
+    DropFiles := GlobalLock(Memory);
+
+    try
+
+      DropFiles^.pFiles := SizeOf(TDropFiles);
+      DropFiles^.fWide := True;
+
+      P := PWideChar(DropFiles) + SizeOf(TDropFiles) div SizeOf(WideChar);
+
+      for I := 0 to Length(aFiles) - 1 do begin
+
+        lstrcpynW(
+          P,
+          PWideChar(aFiles[I]),
+          Length(aFiles[I]) + 1
+        );
+
+        Inc(P, Length(aFiles[I]) + 1);
+
+      end;
+
+      if OpenClipboard(0) then begin
+
+        try
+
+          EmptyClipboard;
+          SetClipboardData(CF_HDROP, Memory);
+
+        finally
+
+          CloseClipboard;
+
+        end;
+
+      end else begin
+
+        Result := False;
+
+      end;
+
+    finally
+
+      GlobalUnlock(Memory);
+
     end;
 
   end;
