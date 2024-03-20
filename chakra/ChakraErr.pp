@@ -4,7 +4,8 @@ unit ChakraErr;
 
 interface
 
-  uses ChakraTypes, SysUtils;
+  uses
+    ChakraTypes, SysUtils;
 
   type
 
@@ -40,70 +41,26 @@ interface
       constructor Create(aMessage: WideString; aScriptError: TScriptError);
     end;
 
-  procedure TryChakraAPI(APIFunctionName: WideString; ErrorCode: TJsErrorCode);
-  procedure ThrowError(Fmt: WideString; Params: array of const);
+  function MessageFormatFromErrorCode(aErrorCode: TJsErrorCode): WideString;
+  function GetScriptError: TScriptError;
+
+  procedure ThrowError(aFmt: WideString; aParams: array of const);
+
+  procedure CheckParams(FunctionName: UnicodeString; Args: PJsValue; ArgCount: Word; ArgTypes: array of TJsValueType; MandatoryCount: Integer);
 
 implementation
 
-  uses chakracore_dll, Chakra;
+  uses
+    Chakra, ChakraAPI, ChakraUtils;
 
-  function ErrorMessage(ErrorCode: TJsErrorCode): WideString;
+  function MessageFormatFromErrorCode;
   begin
-    case ErrorCode of
+    case aErrorCode of
 
       jecInvalidArgument: Result := 'Invalid argument value when calling Chakracore API ''%s''';
       jecNullArgument: Result := 'Argument was null when calling Chakracore API ''%s''';
-      jecOutOfMemory: Result := 'The Chakracore engine has run out of memory';
-
-      else
-
-        Result := WideFormat('An error with code %d has occurred', [Ord(ErrorCode)]);
 
     end;
-  end;
-
-  function GetExceptionMetadata: TJsValue;
-  begin
-    TryChakraAPI('JsGetAndClearExceptionWithMetadata', JsGetAndClearExceptionWithMetadata(Result));
-  end;
-
-  function GetScriptError: TScriptError;
-  var
-    Metadata: TJsValue;
-  begin
-    Metadata := GetExceptionMetadata;
-
-    with Result do begin
-      Line := GetIntProperty(Metadata, 'line');
-      Column := GetIntProperty(Metadata, 'column');
-      Source := GetStringProperty(Metadata, 'source');
-      ScriptName := GetStringProperty(Metadata, 'url');
-
-      Exception := GetProperty(Metadata, 'exception');
-
-      Message := JsValueAsString(Exception);
-    end;
-
-  end;
-
-  procedure TryChakraAPI;
-  var
-    Message: WideString;
-  begin
-    if ErrorCode = jecNoError then Exit;
-
-    Message := ErrorMessage(ErrorCode);
-
-    case TJsErrorCode(Ord(ErrorCode) and $F0000) of
-
-      jecScriptError: raise EChakraScriptError.Create(Message, GetScriptError);
-      jecInvalidArgument, jecNullArgument: raise EChakraAPIError.Create(WideFormat(Message, [APIFunctionName]));
-
-      else
-        raise EChakraError.Create(Message);
-
-    end;
-
   end;
 
   constructor EChakraScriptError.Create;
@@ -122,13 +79,65 @@ implementation
     TryChakraAPI('JsSetException', JsSetException(CreateError(Message)));
   end;
 
+  function GetScriptError;
+  var
+    Metadata: TJsValue;
+  begin
+    TryChakraAPI('JsGetAndClearExceptionWithMetadata', JsGetAndClearExceptionWithMetadata(Metadata));
+
+    with Result do begin
+      Line := GetIntProperty(Metadata, 'line');
+      Column := GetIntProperty(Metadata, 'column');
+      Source := GetStringProperty(Metadata, 'source');
+      ScriptName := GetStringProperty(Metadata, 'url');
+
+      Exception := GetProperty(Metadata, 'exception');
+
+      case GetValueType(Exception) of
+        jsObject: Exception := StringifyJsValue(Exception);
+      end;
+
+      Message := JsValueAsString(Exception);
+    end;
+  end;
+
   procedure ThrowError;
   var
     Message: TJsValue;
   begin
-    Message := StringAsJsString(WideFormat(Fmt, Params));
+    Message := StringAsJsString(WideFormat(aFmt, aParams));
     SetException(Message);
   end;
 
-end.
+  procedure CheckParams;
+  var
+    I: Integer;
+    Value: TJsValue;
+    ValueType: TJsValueType;
+    RequiredTypeName, ValueTypeName: UnicodeString;
+    ValueString: UnicodeString;
+  begin
+    if MandatoryCount > ArgCount then begin
+      ThrowError('Not enough parameters when calling ''%s''. %d parameters expected but %d parameters given', [FunctionName, MandatoryCount, ArgCount]);
+    end;
 
+    for I := 0 to Length(ArgTypes) - 1 do begin
+
+      Value := Args^; Inc(Args);
+
+      ValueType := GetValueType(Value);
+
+      if ValueType <> ArgTypes[I] then begin
+
+        ValueTypeName := JsTypeName(ValueType);
+        ValueString := JsValueAsString(Value);
+
+        RequiredTypeName := JsTypeName(ArgTypes[I]);
+
+        ThrowError('Error calling ''%s''. Argument[%d] (%s)%s must be %s', [ FunctionName, I, ValueTypeName, ValueString, RequiredTypeName ]);
+
+      end;
+    end;
+  end;
+
+end.

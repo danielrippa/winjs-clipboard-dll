@@ -4,15 +4,35 @@ unit ChakraUtils;
 
 interface
 
-  uses ChakraTypes;
+  uses
+    ChakraTypes;
 
-  procedure CheckParams(FunctionName: WideString; Args: PJsValue; ArgCount: Word; ArgTypes: array of TJsValueType; MandatoryCount: Integer);
+  function StringifyJsValue(aValue: TJsValue): TJsValue;
+
+  function JsTypeName(Value: TJsValueType): UnicodeString;
 
 implementation
 
-  uses ChakraErr, SysUtils, Chakra;
+  uses
+    Chakra;
 
-  function JsTypeName(Value: TJsValueType): UnicodeString;
+  function StringifyJsValue;
+  var
+    JSON: TJsValue;
+    stringify: TJsValue;
+    Args: Array of TJsValue;
+    ArgCount: Word;
+  begin
+    JSON := GetProperty(GetGlobalObject, 'JSON');
+    stringify := GetProperty(JSON, 'stringify');
+
+    Args := [ JSON, aValue ];
+    ArgCount := Length(Args);
+
+    Result := CallFunction(stringify, @Args[0], ArgCount);
+  end;
+
+  function JsTypeName;
   begin
     case Value of
       JsUndefined: Result := 'Undefined';
@@ -31,35 +51,5 @@ implementation
     end;
   end;
 
-  procedure CheckParams;
-  var
-    I: Integer;
-    Value: TJsValue;
-    ValueType: TJsValueType;
-    RequiredTypeName, ValueTypeName: UnicodeString;
-    ValueString: UnicodeString;
-  begin
-    if MandatoryCount > ArgCount then begin
-      ThrowError('Not enough parameters when calling ''%s''. %d parameters expected but %d parameters given', [FunctionName, MandatoryCount, ArgCount]);
-    end;
-
-    for I := 0 to Length(ArgTypes) - 1 do begin
-
-      Value := Args^; Inc(Args);
-
-      ValueType := GetValueType(Value);
-
-      if ValueType <> ArgTypes[I] then begin
-
-        ValueTypeName := JsTypeName(ValueType);
-        ValueString := JsValueAsString(Value);
-
-        RequiredTypeName := JsTypeName(ArgTypes[I]);
-
-        ThrowError('Error calling ''%s''. Argument[%d] (%s)%s must be %s', [ FunctionName, I, ValueTypeName, ValueString, RequiredTypeName ]);
-
-      end;
-    end;
-  end;
 
 end.
